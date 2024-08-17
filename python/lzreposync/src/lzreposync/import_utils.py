@@ -58,9 +58,9 @@ def import_repository_packages_in_batch(
     """
     total_failed = 0
     packages = repository.get_packages_metadata()  # packages is a generator
-
+    available_packages = {}
     for i, batch in enumerate(batched(packages, batch_size)):
-        available_packages = {}
+
         failed, _, avail_pkgs = import_package_batch(
             to_process=batch,
             compatible_archs=compatible_arches,
@@ -70,17 +70,15 @@ def import_repository_packages_in_batch(
         )
         total_failed += failed
         available_packages.update(avail_pkgs)
-        # Importing updates/patches
-        # TODO: for the updates import, download the updateinfo file once and pass it each time to the update function
-        #  currently we're downloading the file each time in the loop (for each batch)
-        if import_updates and isinstance(repository, RPMRepo):
-            import_packages_updates(
-                channel=channel,
-                repository=repository,
-                available_packages=available_packages,
-            )
+    # Importing updates/patches)
+    if import_updates and isinstance(repository, RPMRepo):
+        import_repository_updates(
+            channel=channel,
+            repository=repository,
+            available_packages=available_packages,
+        )
 
-        del available_packages
+    del available_packages
 
     return total_failed
 
