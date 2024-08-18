@@ -26,8 +26,9 @@ def batched(iterable, n):
         yield batch
 
 
-def import_packages_updates(channel, repository, available_packages):
+def import_repository_updates(channel, repository, available_packages: dict):
     """
+    Import the updates/patches of the given repo
     :available_packages: a dict of available packages in the format: { name-epoch-version-release-arch : 1 }
     """
     if not isinstance(repository, RPMRepo):
@@ -35,17 +36,19 @@ def import_packages_updates(channel, repository, available_packages):
         return
     updateinfo_url = repository.find_metadata_file_url("updateinfo")
     if not updateinfo_url:
-        logging.debug("Couldn't find updateinfo url in repository %s", repository.name)
+        logging.debug("Couldn't find 'updateinfo' file in repository %s", repository.name)
     else:
-        # TODO possible exception handling
         updateinfo_file = updates_util.download_file(updateinfo_url)
-        _, notices = updates_util.get_updates(updateinfo_file)
-        patches_importer = UpdatesImporter(
+        if not updateinfo_file:
+            logging.error("Couldn't download updateinfo file: ", updateinfo_url)
+            return
+        notices = updates_util.get_updates(updateinfo_file)
+        updates_importer = UpdatesImporter(
             channel_label=channel["label"], available_packages=available_packages
         )
-        patches_importer.import_updates(notices)
+        updates_importer.import_updates(notices)
         # Deleting the patches_importer will call the rhnSQL.closeDB() and free up a db connection
-        del patches_importer
+        del updates_importer
         os.remove(updateinfo_file)
 
 
@@ -198,6 +201,7 @@ def import_package_batch(
                 mpm_src_batch.append(package)
             if compatible_archs and package.arch not in compatible_archs:
                 # skip packages with incompatible architecture
+                logging.debug("Skipping package %s with incompatible arch %s", package.get("name"), package.get("arch"))
                 skipped += 1
                 continue
             epoch = ""
@@ -242,7 +246,6 @@ def import_package_batch(
             importer.run()
             rhnSQL.commit()
             del importer.batch
-            del mpm_bin_batch
 
         # Importing the batch of source packages
         if mpm_src_batch:
@@ -260,7 +263,6 @@ def import_package_batch(
             src_importer.setUploadForce(1)
             src_importer.run()
             rhnSQL.commit()
-            del mpm_src_batch
 
     except (KeyboardInterrupt, rhnSQL.SQLError):
         raise
@@ -272,7 +274,7 @@ def import_package_batch(
         # Cleanup if cache..if applied
         pass
 
-    # Disassociate packages TODO
+    # Disassociate packages TODO: discuss with team the use if this (see reposync)
 
     # TODO: update the linking process and condition checking (see how reposync handles it, each package a part)
     if to_link and channel:
@@ -280,12 +282,11 @@ def import_package_batch(
         log(0, "  Linking packages to the channel.")
 
         # Packages to append to channel
-        # TODO: can we do this reformat in a previous stage to avoid looping again over the lists (it depends on the to_link value)
         import_batches = list(
             chunks(
                 [
                     associate_package(pack, channel["label"], channel)
-                    for pack in to_process
+                    for pack in list(mpm_bin_batch) + list(mpm_src_batch)
                 ],
                 1000,
             )
@@ -306,8 +307,11 @@ def import_package_batch(
 
         # package.clear_header()  # TODO See reposync
     rhnSQL.closeDB()
+    del mpm_bin_batch
+    del mpm_src_batch
     # pylint: disable-next=consider-using-f-string
     log(0, " Pacakge batch #{} completed...".format(batch_index))
+
 
     failed = initial_size - batch_size
     return failed, skipped, available_packages

@@ -125,7 +125,8 @@ def map_flag(flag: str) -> int:
     return 0
 
 
-#  pylint: disable-next=missing-class-docstring
+# TODO parse file tags and override them, if duplicates, in the filelists parser
+# pylint: disable-next=missing-class-docstring
 class PrimaryParser:
     def __init__(self, primary_file, repository="", arch_filter=".*"):
         """
@@ -141,7 +142,13 @@ class PrimaryParser:
         self.current_package = None
         self.current_hdr = None
         self.repository = repository
-        self.arch_filter = arch_filter
+        if arch_filter != ".*" and "noarch" not in arch_filter:
+            arch_filter = re.sub("\(", "", arch_filter)  # remove left parenthesis
+            arch_filter = re.sub("\)", "", arch_filter)  # remove right parenthesis
+            self.arch_filter = "(noarch|{})".format(arch_filter)
+        else:
+            self.arch_filter = arch_filter
+        print(f"===> haroune new filter val: {self.arch_filter}")
 
     def is_valid_primary_file(self, primary_file):
         """
@@ -173,9 +180,9 @@ class PrimaryParser:
             doc = pulldom.parse(gz_primary)
             for event, node in doc:
                 if (
-                    event == pulldom.START_ELEMENT
-                    and node.namespaceURI == COMMON_NS
-                    and node.tagName == "package"
+                        event == pulldom.START_ELEMENT
+                        and node.namespaceURI == COMMON_NS
+                        and node.tagName == "package"
                 ):
                     # New package
                     doc.expandNode(node)
@@ -184,7 +191,7 @@ class PrimaryParser:
                     pkg_arch = get_text(arch_node)
                     # Filter by arch and ignoring src packages
                     if pkg_arch == "src" or not re.fullmatch(
-                        self.arch_filter, pkg_arch
+                            self.arch_filter, pkg_arch
                     ):
                         continue
                     self.current_package = {}
@@ -326,7 +333,7 @@ class PrimaryParser:
                     attr_mapped_name = map_dependency_attribute(elt_name, attr_name)
                     # pylint: disable-next=unidiomatic-typecheck
                     if not isinstance(
-                        self.current_hdr.get(attr_mapped_name), list
+                            self.current_hdr.get(attr_mapped_name), list
                     ):  # Check if list is not initialized
                         self.current_hdr[attr_mapped_name] = []
                     attr = child_node.getAttributeNode(
@@ -372,17 +379,17 @@ class PrimaryParser:
             raise ValueError("No package being parsed")
 
         if (
-            node.nodeType == node.ELEMENT_NODE
-            and node.namespaceURI == COMMON_NS
-            and node.localName == "format"
+                node.nodeType == node.ELEMENT_NODE
+                and node.namespaceURI == COMMON_NS
+                and node.localName == "format"
         ):
             # Recursively set the child elements of the <format> element
             for child in node.childNodes:
                 self.set_element_node(child)
         if (
-            node.nodeType == node.ELEMENT_NODE
-            and node.namespaceURI == COMMON_NS
-            and node.localName == "checksum"
+                node.nodeType == node.ELEMENT_NODE
+                and node.namespaceURI == COMMON_NS
+                and node.localName == "checksum"
         ):
             self.set_checksum_node(node)
         if node.nodeType == node.ELEMENT_NODE and node.hasAttributes():

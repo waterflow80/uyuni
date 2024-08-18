@@ -97,7 +97,7 @@ class RPMMetadataParser:
                     expand_full_filelist=False,
                     remote_path=package["remote_path"],
                 )
-
+                rpm_package.arch = package["header"]["arch"]
                 yield rpm_package
 
             except (KeyboardInterrupt, rhnSQL.SQLError):

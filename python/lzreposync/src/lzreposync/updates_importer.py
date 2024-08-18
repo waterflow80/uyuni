@@ -34,7 +34,7 @@ class UpdatesImporter:
     def __init__(
         self,
         channel_label,
-        available_packages,
+        available_packages,  # TODO: discuss with team the use of this variable: available_packages
         repo_type=None,
         fail=False,
         no_errata=False,
@@ -54,6 +54,7 @@ class UpdatesImporter:
         self.all_errata = set()
         self.error_messages = []
         self.available_packages = available_packages
+        print("====> Haroune: available pacakges:", self.available_packages)
 
         rhnSQL.initDB()
 
@@ -88,7 +89,7 @@ class UpdatesImporter:
                 processed_updates_count = self.upload_updates(notices)
             elif notices_type == "patches":
                 # TODO: Not handled
-                return
+                return None
 
             if processed_updates_count:
                 #  some errata could get retracted and this needs to be reflected in the newest package cache
@@ -456,7 +457,7 @@ class UpdatesImporter:
         rhnSQL.commit()
 
     @staticmethod
-    def _to_db_date(date):
+    def _to_db_date(date): #TODO: use this in the primary parser and pacakges parser
         if not date:
             ret = datetime.utcnow()
         elif date.isdigit():
