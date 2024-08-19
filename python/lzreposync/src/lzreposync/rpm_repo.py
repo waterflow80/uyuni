@@ -48,7 +48,7 @@ class RPMRepo(Repo):
             repository=repository,
             arch_filter=arch_filter,
         )
-        self.signature_verified = True  # Tell whether the signature is checked against the repomd.xml file TODO: complete logic
+        self.signature_verified = True  # Tell whether the signature is checked against the repomd.xml file TODO: complete
 
     def verify_signature(self):
         """

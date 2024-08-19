@@ -536,3 +536,11 @@ def decompress_open(filename):
     if filename.endswith((".gz", ".bz2", ".xz", ".zck")):
         return io.TextIOWrapper(file_obj, encoding="utf8")
     return file_obj
+
+
+if __name__ == "__main__":
+    res = decompress_open("/home/haroune/gsoc/uyuni/python/lzreposync/tests/test-files/Packages_ubuntu_jammy_main_amd64.gz")
+    print(f"Used memory of 'res': {sys.getsizeof(res)} bytes")
+
+    f = gzip.open("/home/haroune/gsoc/uyuni/python/lzreposync/tests/test-files/Packages_ubuntu_jammy_main_amd64.gz")
+    print(f"Used memory of 'res' (using gzip.open): {sys.getsizeof(f)/1024} kilo bytes")

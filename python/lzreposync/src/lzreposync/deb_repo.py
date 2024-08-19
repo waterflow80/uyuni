@@ -27,8 +27,9 @@ log = logging.getLogger(__name__)
 class DebRepo(Repo):
     def __init__(
         self, name, cache_path, url, channel_label=None
-    ):  # TODO remove the arch_filter (the arch is specified in the url query)
+    ):
         super().__init__(name, cache_path, url, None, "deb")
+        # 'arch_filter' is None because the arch is specified in the url query
         self.signature_verified = True  # TODO: complete
         self.url = url
         parts = url.rsplit("/dists/", 1)
@@ -235,5 +236,3 @@ class DebRepo(Repo):
                 f"ERROR: Download of Translation{extension} descriptions file failed."
             )
         return None
-
-    # TODO: delete the downloaded pacakges.gz(xz)/translation.. files after finishing

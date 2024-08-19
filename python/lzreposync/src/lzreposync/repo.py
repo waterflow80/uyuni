@@ -14,8 +14,7 @@ class Repo(metaclass=abc.ABCMeta):
         if not os.path.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
         self.repository = repository
-        if not self.repository.endswith("/"):
-            # TODO there might be a better solution
+        if self.repository and not self.repository.endswith("/"):
             self.repository += "/"
         self.arch_filter = arch_filter
         self.metadata_files = None

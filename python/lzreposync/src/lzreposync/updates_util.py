@@ -213,13 +213,13 @@ def get_updates(infile, md_type="updateinfo"):
                     key = "%s-%s" % (un["update_id"], un["version"])
                     if key not in notices:
                         notices[key] = un
-            return ("updateinfo", notices.values())
+            return notices.values()
     else:
-        return ("", [])
+        return []
 
 
 def download_file(url, cache_dir="."):
-    logging.debug("updates_util: Downloading %s", url)
+    logging.debug("Downloading %s", url)
     if url.startswith("file://"):
         srcpath = unquote(url[len("file://") :])
         if not os.path.exists(srcpath):
