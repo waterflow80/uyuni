@@ -10,7 +10,8 @@ from spacewalk.common.rhnConfig import cfg_component
 from spacewalk.server import rhnSQL, rhnChannel
 
 
-# stolen from python/spacewalk/server/test/misc_functions.py
+# TODO: move this function to a common place
+#  (copied from python/spacewalk/server/test/misc_functions.py)
 def _new_channel_dict(**kwargs):
     # pylint: disable-next=invalid-name
     _counter = 0
@@ -152,19 +153,19 @@ def create_content_source(
         rhnSQL.closeDB()
 
 
-# Stolen from python/spacewalk/satellite_tools/reposync.py
+# TODO: move this function to a common place
+#  (copied from python/spacewalk/satellite_tools/reposync.py
 def get_compatible_arches(channel_label):
     """Return a list of compatible package arch labels for the given channel"""
     rhnSQL.initDB()
     h = rhnSQL.prepare(
-        """select pa.label
-                          from rhnChannelPackageArchCompat cpac,
-                          rhnChannel c,
-                          rhnpackagearch pa
-                          where c.label = :channel_label
-                          and c.channel_arch_id = cpac.channel_arch_id
-                          and cpac.package_arch_id = pa.id"""
+        """SELECT pa.label 
+            FROM rhnChannelPackageArchCompat AS cpac
+            INNER JOIN rhnChannel AS c ON c.channel_arch_id = cpac.channel_arch_id
+            INNER JOIN rhnpackagearch AS pa ON cpac.package_arch_id = pa.id
+            WHERE c.label = :channel_label"""
     )
+
     h.execute(channel_label=channel_label)
     res_dict = h.fetchall_dict()
     if not res_dict:
@@ -177,9 +178,7 @@ def get_compatible_arches(channel_label):
         arches = [
             k["label"]
             for k in res_dict
-            if CFG.SYNC_SOURCE_PACKAGES
-            or k["label"]
-            not in ["src", "nosrc"]  # TODO: what is CFG.SYNC_SOURCE_PACKAGES - ask team
+            if CFG.SYNC_SOURCE_PACKAGES or k["label"] not in ["src", "nosrc"]
         ]
     rhnSQL.closeDB()
     return arches
