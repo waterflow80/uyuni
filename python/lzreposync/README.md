@@ -16,6 +16,7 @@ $ pip install -e .
 3. Install other required dependencies (required by spacewalk and other modules)
 ```sh
 pip install rpm
+pip install salt
 ```
 4. Add a path configuration file (**Important!**)
 ```

@@ -14,15 +14,15 @@ from psycopg2.errorcodes import UNIQUE_VIOLATION
 from lzreposync.db_utils import get_all_arches
 from lzreposync.db_utils import get_channel_info_by_label
 from lzreposync.db_utils import get_compatible_arches
-from lzreposync.deb_metadata_parser import DEBMetadataParser
+from lzreposync.deb_metadata_parser import parse_deb_packages_metadata
 from lzreposync.filelists_parser import FilelistsParser
-from lzreposync.import_utils import import_packages_in_batch_from_parser
+from lzreposync.import_utils import import_packages_in_batch
 from lzreposync.packages_parser import PackagesParser
 from lzreposync.primary_parser import (
     PrimaryParser,
 )
 from lzreposync.repo_dto import RepoDTO
-from lzreposync.rpm_metadata_parser import RPMMetadataParser
+from lzreposync.rpm_metadata_parser import parse_rpm_packages_metadata
 from lzreposync.translation_parser import TranslationParser
 from lzreposync.updates_importer import UpdatesImporter
 from lzreposync.updates_util import get_updates
@@ -181,7 +181,7 @@ def _empty_database():
 
 
 class LazyRepoSyncTest(unittest.TestCase):
-
+    # TODO: change the paths of the test files using ENV variables
     def setUp(self):
         # Start with a fresh/empty database
         _empty_database()
@@ -355,12 +355,9 @@ class LazyRepoSyncTest(unittest.TestCase):
         )
 
     def test_parse_metadata(self):
-        primary_parser = PrimaryParser("tests/test-files/primary-sample-2.xml.gz")
-        file_lists_parser = FilelistsParser(
-            "tests/test-files/filelists-sample-2.xml.gz"
-        )  # TODO: change the paths using ENV variables
-        rpm_metadata_parser = RPMMetadataParser(primary_parser, file_lists_parser)
-        package_gen = rpm_metadata_parser.parse_packages_metadata()
+        primary = "tests/test-files/primary-sample-2.xml.gz"
+        filelists = "tests/test-files/filelists-sample-2.xml.gz"
+        package_gen = parse_rpm_packages_metadata(primary, filelists, "", ".cache")
         package1 = next(package_gen)
         package2 = next(package_gen)
         pkgid = package1["checksum"]
@@ -380,8 +377,6 @@ class LazyRepoSyncTest(unittest.TestCase):
         self.assertEqual(
             pkgid2, "5aac91b3ec4b358b22fe50cf0a23d6ea6139ca2f1909f99b6c3b5734ca12530f"
         )
-
-        file_lists_parser.clear_cache()
 
     def test_arch_filter_primary(self):
         """
@@ -530,19 +525,15 @@ class LazyRepoSyncTest(unittest.TestCase):
 
         primary_gz = "tests/test-files/centos-stream-9-primary.xml.gz"
         filelists_gz = "tests/test-files/centos-stream-9-filelists.xml.gz"
-        primary_parser = PrimaryParser(primary_gz)
-        filelists_parser = FilelistsParser(filelists_gz)
-        rpm_metadata_parser = RPMMetadataParser(
-            primary_parser=primary_parser, filelists_parser=filelists_parser
+        packages = parse_rpm_packages_metadata(
+            primary_gz, filelists_gz, test_repo_url, cache_dir=".cache"
         )
-        import_packages_in_batch_from_parser(
-            rpm_metadata_parser,
+        import_packages_in_batch(
+            packages,
             batch_size=100,
             channel=channel,
             compatible_arches=compatible_arches,
         )
-        filelists_parser.clear_cache()
-
         rhnSQL.initDB()
         # Check imported packages
         packages_count_query = rhnSQL.prepare("SELECT count(id) from rhnPackage")
@@ -619,15 +610,11 @@ class LazyRepoSyncTest(unittest.TestCase):
 
         primary_gz = "tests/test-files/c12180-tumbleweed-primary.xml.gz"
         filelists_gz = "tests/test-files/42b53c-tumbleweed-filelists.xml.gz"
-
-        primary_parser = PrimaryParser(primary_gz)
-        filelists_parser = FilelistsParser(filelists_gz)
-
-        rpm_metadata_parser = RPMMetadataParser(
-            primary_parser=primary_parser, filelists_parser=filelists_parser
+        packages = parse_rpm_packages_metadata(
+            primary_gz, filelists_gz, test_repo_url, cache_dir=".cache"
         )
-        import_packages_in_batch_from_parser(
-            rpm_metadata_parser,
+        import_packages_in_batch(
+            packages,
             batch_size=batch_size,
             channel=channel,
             compatible_arches=compatible_arches,
@@ -750,7 +737,6 @@ class LazyRepoSyncTest(unittest.TestCase):
 
         rhnSQL.commit()
         rhnSQL.closeDB()
-        filelists_parser.clear_cache()
 
     def test_parse_packages_file_ubuntu_jammy_main_amd64(self):
         """
@@ -839,9 +825,7 @@ class LazyRepoSyncTest(unittest.TestCase):
         channel_arch = "amd64-deb"
         test_channel_label = "test_channel"
         test_repo_label = "ubuntu_jammy"
-        test_repo_url = (
-            "https://ubuntu.mirrors.uk2.net/ubuntu/dists/jammy/main/binary-amd64/"
-        )
+        test_repo_url = "https://ubuntu.mirrors.uk2.net/ubuntu?uyuni_suite=jammy&uyuni_component=main&uyuni_arch=amd64"
         base_url = "https://ubuntu.mirrors.uk2.net/ubuntu/"
         batch_size = 20
         num_packages = 6090
@@ -881,6 +865,7 @@ class LazyRepoSyncTest(unittest.TestCase):
             channel_label=test_channel_label,
             repo_label=test_repo_label,
             source_url=test_repo_url,
+            source_type="deb",
         )
         compatible_arches = get_all_arches()
 
@@ -890,14 +875,12 @@ class LazyRepoSyncTest(unittest.TestCase):
         translation_file = fileutils.decompress_open(
             "tests/test-files/Translation_ubuntu_jammy_main_amd64.gz"
         )
-        packages_parser = PackagesParser(packages_file, base_url)
-        translation_parser = TranslationParser(translation_file)
-        deb_metadata_parser = DEBMetadataParser(
-            packages_parser=packages_parser, translation_parser=translation_parser
+        packages = parse_deb_packages_metadata(
+            packages_file, translation_file, base_url, cache_dir=".cache"
         )
 
-        import_packages_in_batch_from_parser(
-            deb_metadata_parser,
+        import_packages_in_batch(
+            packages,
             batch_size=batch_size,
             channel=channel,
             compatible_arches=compatible_arches,
@@ -1005,7 +988,6 @@ class LazyRepoSyncTest(unittest.TestCase):
 
         rhnSQL.commit()
         rhnSQL.closeDB()
-        translation_parser.clear_cache()
 
     def test_get_channel_info_by_label(self):
 
@@ -1071,13 +1053,11 @@ class LazyRepoSyncTest(unittest.TestCase):
         compatible_arches = get_compatible_arches(channel_label)
         primary_gz = "tests/test-files/update-leap-15-primary.xml.gz"
         filelists_gz = "tests/test-files/update-leap-15-filelists.xml.gz"
-        primary_parser = PrimaryParser(primary_gz)
-        filelists_parser = FilelistsParser(filelists_gz)
-        rpm_metadata_parser = RPMMetadataParser(
-            primary_parser=primary_parser, filelists_parser=filelists_parser
+        packages = parse_rpm_packages_metadata(
+            primary_gz, filelists_gz, repo_url, cache_dir=".cache"
         )
-        import_packages_in_batch_from_parser(
-            rpm_metadata_parser,
+        import_packages_in_batch(
+            packages,
             batch_size=20,
             channel=channel,
             compatible_arches=compatible_arches,
@@ -1162,8 +1142,6 @@ class LazyRepoSyncTest(unittest.TestCase):
             "gpg-pubkey-3fa1d6ce-63c9481c.asc: new SLES 15 4k RSA key.\n",
             pack2_errata.get("description"),
         )
-
-        filelists_parser.clear_cache()
 
 
 if __name__ == "__main__":
