@@ -11,11 +11,8 @@ from urllib.parse import urljoin
 from xml.dom import pulldom
 
 import gnupg
-
-from lzreposync.filelists_parser import FilelistsParser
-from lzreposync.primary_parser import PrimaryParser
 from lzreposync.repo import Repo
-from lzreposync.rpm_metadata_parser import RPMMetadataParser
+from lzreposync.rpm_metadata_parser import parse_rpm_packages_metadata
 
 
 class ChecksumVerificationException(ValueError):
@@ -196,19 +193,14 @@ class RPMRepo(Repo):
                     # Work on temporary file without loading it into memory at once
                     primary_tmp_file.seek(0)
                     filelists_tmp_file.seek(0)
-                    primary_parser = PrimaryParser(
-                        primary_file=primary_tmp_file,
-                        repository=self.repository,
-                        arch_filter=self.arch_filter,
+                    packages = parse_rpm_packages_metadata(
+                        primary_tmp_file,
+                        filelists_tmp_file,
+                        self.repository,
+                        self.cache_dir,
+                        self.arch_filter,
                     )
-                    filelists_parser = FilelistsParser(
-                        filelists_tmp_file, self.arch_filter
-                    )
-                    metadata_parser = RPMMetadataParser(
-                        primary_parser=primary_parser, filelists_parser=filelists_parser
-                    )
-                    yield from metadata_parser.parse_packages_metadata()
-                    filelists_parser.clear_cache()  # TODO can we make this execute automatically
+                    yield from packages
                 break
             except urllib.error.HTTPError as e:
                 # We likely hit the repo while it changed:

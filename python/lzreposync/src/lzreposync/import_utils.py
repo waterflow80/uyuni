@@ -2,12 +2,11 @@
 import logging
 import os
 import sys
+import types
 from itertools import islice
 
 from lzreposync import updates_util
 from lzreposync.rpm_repo import RPMRepo
-from lzreposync.deb_metadata_parser import DEBMetadataParser
-from lzreposync.rpm_metadata_parser import RPMMetadataParser
 from lzreposync.updates_importer import UpdatesImporter
 from spacewalk.satellite_tools.syncLib import log2, log
 from spacewalk.server import rhnSQL
@@ -86,21 +85,18 @@ def import_repository_packages_in_batch(
     return total_failed
 
 
-def import_packages_in_batch_from_parser(
-    parser, batch_size, channel=None, compatible_arches=None
+def import_packages_in_batch(
+    packages, batch_size, channel=None, compatible_arches=None
 ):
     """
     Import packages form parser
-    :parser: RPMMetadataParser | DEBMetadataParser
+    :packages: a generator of packages
     Return a tuple of (failed, available_packages)
     ( available_packages: a dict of available packages in the format: {name-epoch-version-release-arch:1} )
     """
-    if not isinstance(parser, (RPMMetadataParser, DEBMetadataParser)):
-        raise ValueError(
-            "Invalid parser. Should be of type RPMMetadataParser or DEBMetadataParser"
-        )
+    if not isinstance(packages, types.GeneratorType):
+        raise ValueError("Invalid packages type. Should be a generator")
     total_failed = 0
-    packages = parser.parse_packages_metadata()  # packages is a generator
     # TODO: (enhancement) can we add parallelism/multithreading here ? discuss with team
     for i, batch in enumerate(batched(packages, batch_size)):
         failed, _, _ = import_package_batch(
