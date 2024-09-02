@@ -211,6 +211,14 @@ def get_channel_info_by_label(channel_label):
     return channel or None
 
 
+class NoSourceFoundForChannel(Exception):
+    """Raised when no source(repository) was found"""
+
+    def __init__(self, channel_label):
+        self.msg = f"No resource found for channel {channel_label}"
+        super().__init__(self.msg)
+
+
 def get_repositories_by_channel_label(channel_label):
     """
     Fetch repositories information of a given channel form the database, and return a list of
@@ -219,20 +227,19 @@ def get_repositories_by_channel_label(channel_label):
     rhnSQL.initDB()
     h = rhnSQL.prepare(
         """
-        select c.label as channel_label, s.id, c_ark.name as channel_arch, s.source_url, s.metadata_signed, s.label as repo_label, cst.label as repo_type_label
-        from rhnChannel c,
-             rhnChannelArch c_ark,
-             rhnContentSource s,
-             rhnChannelContentSource cs,
-             rhnContentSourceType cst
-        where c.label = :channel_label
-          and c.channel_arch_id = c_ark.id
-          and s.id = cs.source_id
-          and cst.id = s.type_id
-          and cs.channel_id = c.id"""
+        SELECT c.label as channel_label, c_ark.name as channel_arch, s.id, s.source_url, s.metadata_signed, s.label as repo_label, cst.label as repo_type_label
+        FROM rhnChannel c
+        INNER JOIN rhnChannelArch c_ark ON c.channel_arch_id = c_ark.id
+        INNER JOIN rhnChannelContentSource cs ON c.id = cs.channel_id
+        INNER JOIN rhnContentSource s ON cs.source_id = s.id
+        INNER JOIN  rhnContentSourceType cst ON s.type_id = cst.id
+        WHERE c.label = :channel_label
+        """
     )
     h.execute(channel_label=channel_label)
     sources = h.fetchall_dict()
+    if not sources:
+        raise NoSourceFoundForChannel(channel_label)
     repositories = map(
         lambda source: RepoDTO(
             channel_label=source["channel_label"],
