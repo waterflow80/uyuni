@@ -11,7 +11,7 @@ from more_itertools import ilen
 from psycopg2 import errors
 from psycopg2.errorcodes import UNIQUE_VIOLATION
 
-from lzreposync.db_utils import get_all_arches
+from lzreposync.db_utils import get_all_arches, get_repositories_by_channel_label
 from lzreposync.db_utils import get_channel_info_by_label
 from lzreposync.db_utils import get_compatible_arches
 from lzreposync.deb_metadata_parser import parse_deb_packages_metadata
@@ -21,7 +21,6 @@ from lzreposync.packages_parser import PackagesParser
 from lzreposync.primary_parser import (
     PrimaryParser,
 )
-from lzreposync.repo_dto import RepoDTO
 from lzreposync.rpm_metadata_parser import parse_rpm_packages_metadata
 from lzreposync.translation_parser import TranslationParser
 from lzreposync.updates_importer import UpdatesImporter
@@ -50,46 +49,6 @@ def _load_json_file(filename: str):
     except FileNotFoundError:
         print(f"Error: file {filename} does not exist !!")
         return None
-
-
-def _get_repository_by_channel_label(channel_label):
-    """
-    Fetch the first matching repository's information of a given channel form the database
-    return the corresponding RepoDTO object
-    """
-    rhnSQL.initDB()
-    h = rhnSQL.prepare(
-        """
-        select c.label as channel_label, s.id, c_ark.name as channel_arch, s.source_url, s.metadata_signed, s.label as repo_label, cst.label as repo_type_label
-        from rhnChannel c,
-             rhnChannelArch c_ark,
-             rhnContentSource s,
-             rhnChannelContentSource cs,
-             rhnContentSourceType cst
-        where c.label = :channel_label
-          and c.channel_arch_id = c_ark.id
-          and s.id = cs.source_id
-          and cst.id = s.type_id
-          and cs.channel_id = c.id"""
-    )
-    h.execute(channel_label=channel_label)
-    source = h.fetchone_dict()
-    repository = None
-    if source:
-        repository = RepoDTO(
-            channel_label=source["channel_label"],
-            repo_id=source["id"],
-            channel_arch=source["channel_arch"],
-            repo_label=source["repo_label"],
-            repo_type=source["repo_type_label"],
-            source_url=source["source_url"],
-            metadata_signed=source["metadata_signed"],
-        )
-    else:
-        print(f"INFO: Couldn't find repo for channel {channel_label}")
-
-    rhnSQL.closeDB()
-    return repository
 
 
 # stolen from python/spacewalk/server/test/misc_functions.py
@@ -180,6 +139,30 @@ def _empty_database():
     rhnSQL.closeDB()
 
 
+fetch_package_sql = """
+                    SELECT p.id, p.summary, p.description, p.vendor, p.copyright, p.remote_path, p.package_size,
+                    p.payload_size, p.installed_size, p.build_host, p.build_time, p.header_start, p.header_end,
+                    ct.label AS checksum_type, ck.checksum, pn.name, pevr.epoch, pevr.version, pevr.release,
+                    pg.name AS group, pa.name arch
+
+                    FROM rhnPackage p
+                    INNER JOIN rhnPackageName pn ON p.name_id = pn.id
+                    INNER JOIN rhnPackageEvr pevr ON p.evr_id = pevr.id
+                    INNER JOIN rhnPackageGroup pg ON p.package_group = pg.id
+                    INNER JOIN rhnPackageArch pa ON p.package_arch_id = pa.id
+                    INNER JOIN rhnChecksum ck ON p.checksum_id = ck.id
+                    INNER JOIN rhnChecksumType ct ON ck.checksum_type_id = ct.id
+                    WHERE ck.checksum = :pkg_checksum
+                    """
+fetch_capability_sql = """
+                        SELECT pc.name AS capability 
+                        FROM rhnPackage{} pp
+                        INNER JOIN rhnPackageCapability pc ON pp.capability_id = pc.id 
+                        INNER JOIN rhnPackage p ON pp.package_id = p.id
+                        INNER JOIN rhnChecksum pck ON p.checksum_id = pck.id
+                        WHERE pck.checksum = :pkg_checksum"""
+
+
 class LazyRepoSyncTest(unittest.TestCase):
     # TODO: change the paths of the test files using ENV variables
     def setUp(self):
@@ -232,7 +215,7 @@ class LazyRepoSyncTest(unittest.TestCase):
             rhnSQL.initDB()
             fetch_source_type_query = rhnSQL.prepare(
                 """
-                SELECT id from rhnContentSourceType where label = :source_type_label"""
+                SELECT id FROM rhnContentSourceType WHERE label = :source_type_label"""
             )
             fetch_source_type_query.execute(source_type_label=source_type)
             type_id = fetch_source_type_query.fetchone_dict()["id"]
@@ -253,7 +236,7 @@ class LazyRepoSyncTest(unittest.TestCase):
 
             fetch_source_id_query = rhnSQL.prepare(
                 """
-                SELECT id from rhnContentSource LIMIT 1"""
+                SELECT id FROM rhnContentSource LIMIT 1"""
             )
             fetch_source_id_query.execute()
             source_id = fetch_source_id_query.fetchone_dict()["id"]
@@ -536,7 +519,7 @@ class LazyRepoSyncTest(unittest.TestCase):
         )
         rhnSQL.initDB()
         # Check imported packages
-        packages_count_query = rhnSQL.prepare("SELECT count(id) from rhnPackage")
+        packages_count_query = rhnSQL.prepare("SELECT count(id) FROM rhnPackage")
         packages_count_query.execute()
         packages_count = packages_count_query.fetchone()[0]
 
@@ -623,7 +606,7 @@ class LazyRepoSyncTest(unittest.TestCase):
         rhnSQL.initDB()
         # Check imported packages
         packages_count_query = rhnSQL.prepare(
-            """SELECT count(id) from rhnPackage
+            """SELECT COUNT(id) FROM rhnPackage
             """
         )
         packages_count_query.execute()
@@ -632,33 +615,10 @@ class LazyRepoSyncTest(unittest.TestCase):
         # Check associated packages to channel
         channel_packages_count_query = rhnSQL.prepare(
             """
-            SELECT count(*) FROM rhnChannelPackage WHERE channel_id = :channel_id"""
+            SELECT COUNT(*) FROM rhnChannelPackage WHERE channel_id = :channel_id"""
         )
         channel_packages_count_query.execute(channel_id=channel["id"])
         channel_packages_count = channel_packages_count_query.fetchone()[0]
-
-        fetch_package_sql = """
-                    select p.id, p.summary, p.description, p.vendor, p.copyright, p.remote_path, p.package_size,
-                    p.payload_size, p.installed_size, p.build_host, p.build_time, p.header_start, p.header_end,
-                    ct.label as checksum_type, ck.checksum, pn.name, pevr.epoch, pevr.version, pevr.release,
-                    pg.name as group, pa.name arch
-
-                    from rhnPackage p,
-                         rhnChecksumType ct,
-                         rhnChecksum ck,
-                         rhnPackageName pn,
-                         rhnPackageEvr pevr,
-                         rhnPackageGroup pg,
-                         rhnPackageArch pa
-                    where ck.checksum = :pkg_checksum
-                      and p.checksum_id = ck.id
-                      and ck.checksum_type_id = ct.id
-                      and p.name_id = pn.id
-                      and p.evr_id = pevr.id
-                      and p.package_group = pg.id
-                      and p.package_arch_id = pa.id
-                    """
-
         fetched_package = rhnSQL.fetchone_dict(
             fetch_package_sql, pkg_checksum=first_package_info["checksum"]
         )
@@ -703,10 +663,6 @@ class LazyRepoSyncTest(unittest.TestCase):
         self.assertEqual(first_package_info["group"], fetched_package.get("group"))
 
         # Checking capabilities of first pacakge
-        fetch_capability_sql = """
-                select pc.name as capability from rhnPackage{} pp, rhnPackageCapability pc, rhnPackage p, rhnChecksum pck 
-                where p.checksum_id = pck.id and pp.capability_id = pc.id and pp.package_id = p.id 
-                and pck.checksum = :pkg_checksum"""
         for cap in ("provides", "requires"):
             result = rhnSQL.execute(
                 fetch_capability_sql.format(cap),
@@ -720,10 +676,13 @@ class LazyRepoSyncTest(unittest.TestCase):
         # Checking files
         test_pkg_checksum = "d3c2384fd95d4f1b834a7d98fa331b9d31a09860e3ea0b5a742b7a83356c77ae"  # random package
         fetch_files_sql = """
-        select pc.name capability, pf.file_mode from rhnPackageFile pf, rhnPackageCapability pc, rhnPackage p, 
-        rhnChecksum pck where pf.package_id = p.id and p.checksum_id = pck.id 
-        and pck.checksum = :pkg_checksum
-        and pc.id = pf.capability_id"""
+                SELECT pc.name capability, pf.file_mode 
+                FROM rhnPackageFile pf
+                INNER JOIN rhnPackageCapability pc ON pf.capability_id = pc.id
+                INNER JOIN rhnPackage p ON pf.package_id = p.id
+                INNER JOIN rhnChecksum pck ON p.checksum_id = pck.id 
+                WHERE pck.checksum = :pkg_checksum"""
+
         result = rhnSQL.execute(fetch_files_sql, pkg_checksum=test_pkg_checksum)
         files_list = result.fetchall_dict()
         self.assertEqual(105, len(files_list))
@@ -903,28 +862,6 @@ class LazyRepoSyncTest(unittest.TestCase):
         channel_packages_count_query.execute(channel_id=channel["id"])
         channel_packages_count = channel_packages_count_query.fetchone()[0]
 
-        fetch_package_sql = """
-                    select p.id, p.summary, p.description, p.vendor, p.copyright, p.remote_path, p.package_size, 
-                    p.payload_size, p.installed_size, p.build_host, p.build_time, p.header_start, p.header_end, 
-                    ct.label as checksum_type, ck.checksum, pn.name, pevr.epoch, pevr.version, pevr.release, 
-                    pg.name as group, pa.name arch
-
-                    from rhnPackage p,
-                         rhnChecksumType ct,
-                         rhnChecksum ck,
-                         rhnPackageName pn,
-                         rhnPackageEvr pevr,
-                         rhnPackageGroup pg,
-                         rhnPackageArch pa
-                    where ck.checksum = :pkg_checksum
-                      and p.checksum_id = ck.id
-                      and ck.checksum_type_id = ct.id
-                      and p.name_id = pn.id
-                      and p.evr_id = pevr.id
-                      and p.package_group = pg.id
-                      and p.package_arch_id = pa.id
-                    """
-
         fetched_package = rhnSQL.fetchone_dict(
             fetch_package_sql, pkg_checksum=first_package_info["checksum"]
         )
@@ -973,10 +910,6 @@ class LazyRepoSyncTest(unittest.TestCase):
         self.assertEqual(fetched_package.get("vendor"), first_package_info["vendor"])
 
         # Checking capabilities of first pacakge
-        fetch_capability_sql = """
-                        select pc.name as capability from rhnPackage{} pp, rhnPackageCapability pc, rhnPackage p, rhnChecksum pck 
-                        where p.checksum_id = pck.id and pp.capability_id = pc.id and pp.package_id = p.id 
-                        and pck.checksum = :pkg_checksum"""
         for cap in ("requires", "recommends", "suggests"):
             result = rhnSQL.execute(
                 fetch_capability_sql.format(cap),
@@ -1090,15 +1023,11 @@ class LazyRepoSyncTest(unittest.TestCase):
                     select e.id, e.advisory_name, e.advisory_rel, e.advisory_type, e.advisory_status, e.product, 
                     e.synopsis, e.description 
                     
-                    from rhnErrata e, 
-                    rhnPackage p, 
-                    rhnPackageName pn, 
-                    rhnErrataPackage errpack 
-                    
-                    where pn.id = p.name_id 
-                    and errpack.package_id = p.id 
-                    and errpack.errata_id = e.id 
-                    and pn.name = :package_name"""
+                    FROM rhnErrata e
+                    INNER JOIN rhnErrataPackage errpack ON errpack.errata_id = e.id
+                    INNER JOIN rhnPackage p ON errpack.package_id = p.id
+                    INNER JOIN rhnPackageName pn ON p.name_id = pn.id
+                    WHERE pn.name = :package_name"""
         )
         fetch_errata_count_query.execute()
         errata_count = fetch_errata_count_query.fetchone()[0]
@@ -1142,6 +1071,25 @@ class LazyRepoSyncTest(unittest.TestCase):
             "gpg-pubkey-3fa1d6ce-63c9481c.asc: new SLES 15 4k RSA key.\n",
             pack2_errata.get("description"),
         )
+
+    def test_get_repositories_by_channel_label(self):
+        channel_label = "test_channel"
+        channel_arch = "x86_64"
+        repo_label = "update_leap_15"
+        repo_url = "https://download.opensuse.org/update/leap/15.5/oss/"
+        self._init_channel(channel_label, channel_arch)
+        self._create_content_source(
+            channel_label, repo_label=repo_label, source_url=repo_url
+        )
+
+        repositories = get_repositories_by_channel_label(channel_label)
+        repo = repositories[0]
+        self.assertEqual("yum", repo.repo_type)
+        self.assertEqual(channel_label, repo.channel_label)
+        self.assertEqual(channel_arch, repo.channel_arch)
+        self.assertEqual(repo_label, repo.repo_label)
+        self.assertEqual(repo_url, repo.source_url)
+        self.assertEqual("N", repo.metadata_singed)
 
 
 if __name__ == "__main__":

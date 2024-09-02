@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+import re
 import tempfile
 import time
 import urllib.error
@@ -39,6 +40,13 @@ def get_text(node_list):
 class RPMRepo(Repo):
 
     def __init__(self, name, cache_path, repository, arch_filter=".*"):
+        # Adding 'noarch' to be parsed if not specified
+        if arch_filter != ".*" and "noarch" not in arch_filter:
+            arch_filter = re.sub(
+                "[()]", "", arch_filter
+            )  # remove left & right parenthesis
+            arch_filter = f"(noarch|{arch_filter})"
+
         super().__init__(
             name=name,
             cache_path=cache_path,
