@@ -46,7 +46,8 @@ SYNC_SOURCE_PACKAGES=0
 ```
 6. Try `lzreposync`
 ``` sh
-$ lzreposync -u https://download.opensuse.org/update/leap/15.5/oss/ --type yum [--import-updates]
+$ lzreposync -u https://download.opensuse.org/update/leap/15.5/oss/ --type yum [--no-errata]
+$ lzreposync --type deb --url 'https://ppa.launchpadcontent.net/longsleep/golang-backports/ubuntu?uyuni_suite=jammy&uyuni_component=main&uyuni_arch=amd64'
 ```
 
 ### How do I ...?
