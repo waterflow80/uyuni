@@ -2,7 +2,6 @@
 import logging
 import os
 import sys
-import types
 from itertools import islice
 
 from lzreposync import updates_util
@@ -54,7 +53,7 @@ def import_repository_updates(channel, repository, available_packages: dict):
 
 
 def import_repository_packages_in_batch(
-    repository, batch_size, channel=None, compatible_arches=None, import_updates=False
+    repository, batch_size, channel=None, compatible_arches=None, no_errata=False
 ):
     """
     Return the number of failed packages
@@ -72,8 +71,8 @@ def import_repository_packages_in_batch(
         )
         total_failed += failed
         available_packages.update(avail_pkgs)
-    # Importing updates/patches)
-    if import_updates and isinstance(repository, RPMRepo):
+    # Importing updates/patches (sync errata)
+    if not no_errata and isinstance(repository, RPMRepo):
         import_repository_updates(
             channel=channel,
             repository=repository,
@@ -94,8 +93,6 @@ def import_packages_in_batch(
     Return a tuple of (failed, available_packages)
     ( available_packages: a dict of available packages in the format: {name-epoch-version-release-arch:1} )
     """
-    if not isinstance(packages, types.GeneratorType):
-        raise ValueError("Invalid packages type. Should be a generator")
     total_failed = 0
     # TODO: (enhancement) can we add parallelism/multithreading here ? discuss with team
     for i, batch in enumerate(batched(packages, batch_size)):
